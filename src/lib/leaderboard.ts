@@ -14,12 +14,36 @@ export type BoardRow = {
   darumaMs: number;
 };
 
+// Substrings that may not appear in a name once spacing and look-alike digits
+// are normalised. Extend as needed.
+// Kept short on purpose: shorter fragments like "fag", "shit" or "dick" would
+// block real names (Fagbemi, Shittu, Dickson).
+const BLOCKED = ["fuck", "bitch", "cunt", "pussy", "nigg", "nazi", "hitler"];
+
+function isCleanTag(tag: string): boolean {
+  const flat = tag
+    .toLowerCase()
+    .replace(/[0@]/g, "o")
+    .replace(/[1!|]/g, "i")
+    .replace(/3/g, "e")
+    .replace(/[4]/g, "a")
+    .replace(/[5$]/g, "s")
+    .replace(/[^a-z]/g, "");
+  return !BLOCKED.some((w) => flat.includes(w));
+}
+
 const tagSchema = z
   .string()
   .trim()
   .min(2)
   .max(14)
-  .regex(/^[A-Za-z0-9 ]+$/);
+  .regex(/^[A-Za-z0-9 ]+$/)
+  .refine(isCleanTag, "Pick a different name.");
+
+// Attempts older than 120 minutes are deleted on the next start; they can never
+// be submitted (the cap is 5 stages x 20 min, and the clock check is tighter).
+// Global ceiling on new attempts per minute; blocks table-spamming scripts.
+const MAX_ATTEMPTS_PER_MINUTE = 120;
 
 const submitSchema = z.object({
   attemptId: z.string().regex(/^[0-9a-f-]{36}$/i),
@@ -87,6 +111,13 @@ export const listBoard = createServerFn({ method: "GET" }).handler(async () => {
 
 export const startAttempt = createServerFn({ method: "POST" }).handler(async () => {
   const sql = await getSql();
+  await sql`delete from attempts where started_at < now() - interval '120 minutes'`;
+  const recent = await sql<{ n: number }>`
+    select count(*)::int as n from attempts where started_at > now() - interval '1 minute'
+  `;
+  if (Number(recent[0]?.n ?? 0) >= MAX_ATTEMPTS_PER_MINUTE) {
+    throw new Error("Too many runs starting right now. Try again in a minute.");
+  }
   const id = crypto.randomUUID();
   await sql`insert into attempts (id) values (${id})`;
   return { id };

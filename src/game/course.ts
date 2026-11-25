@@ -541,8 +541,18 @@ export function buildStage(id: TierId): Stage {
   return stage;
 }
 
+/**
+ * Fastest time a stage can physically be cleared: the straight-line distance
+ * from the start line to the button at the style's top run speed. The 0.85
+ * factor leaves room for boost pads (500 px/s) and rounding, so honest runs
+ * never trip it while faked times well under real play are rejected.
+ */
 export function stageMinMs(id: TierId): number {
-  return Math.round((buildStage(id).length / 520) * 1000);
+  const stage = buildStage(id);
+  const startX = (stage.marks[0]?.x ?? 0) + 120;
+  const distance = Math.max(0, stage.button.x - startX);
+  const top = styleStats(stage.style).run;
+  return Math.round((distance / top) * 0.85 * 1000);
 }
 
 export function playerRect(r: Pick<Runner, "x" | "y" | "h">): Rect {
